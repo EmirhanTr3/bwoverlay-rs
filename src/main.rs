@@ -1,12 +1,12 @@
 use anyhow::Result;
 use hotwatch::{EventKind, Hotwatch};
 use hypixel::{ApiHypixelData, HypixelPlayer};
-use log::{error, trace, warn};
+use log::{error, info, warn, LevelFilter};
 use regex::Regex;
 use reqwest::Client;
 use serde_derive::{Deserialize, Serialize};
 use serde_json::json;
-use std::{collections::HashMap, sync::Arc};
+use std::{collections::HashMap, path::PathBuf, sync::Arc};
 use tokio::{
     fs::{self, File},
     io::AsyncWriteExt,
@@ -37,6 +37,7 @@ impl std::default::Default for Config {
         }
         log_path.push(".minecraft");
         log_path.push("logs");
+        log_path.push("latest.log");
 
         Config {
             log_path: log_path.display().to_string(),
@@ -58,49 +59,74 @@ async fn read_config() -> Result<Config> {
     let exists = matches!(fs::try_exists("config.toml").await, Ok(true));
 
     if !exists {
-        trace!("Creating config file at {CONFIG_PATH}");
+        info!("Creating config file at {CONFIG_PATH}");
         let mut f = File::create(CONFIG_PATH).await?;
 
-        trace!("Generating default config");
+        info!("Generating default config");
         let config = Config::default();
         let config_str = toml::to_string(&config)?;
-        f.write_all(config_str.as_bytes()).await;
+        let _ = f.write_all(config_str.as_bytes()).await;
     }
 
     let config_str = std::fs::read_to_string(CONFIG_PATH)?;
-    let config: Config = toml::from_str(&config_str)?;
+    let mut config: Config = toml::from_str(&config_str)?;
+    let mut log_path = PathBuf::from(&config.log_path);
+    if !log_path.ends_with("latest.log") {
+        warn!("Log path is not pointing to latest.log, pushing it to path");
+        log_path.push("latest.log");
+    }
+    config.log_path = log_path.to_string_lossy().to_string();
+
     Ok(config)
 }
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    simple_logger::SimpleLogger::new().env().init().unwrap();
+    simple_logger::SimpleLogger::new()
+        .env()
+        .with_level(LevelFilter::Info)
+        .init()
+        .unwrap();
 
     let config = Arc::new(read_config().await?);
     let rt = Runtime::new()?;
     let rt = Arc::new(rt);
 
     let mut hotwatch = Hotwatch::new()?;
+    info!("Watching log path: {}", config.log_path);
     hotwatch.watch(config.log_path.clone(), move |event| {
         if let EventKind::Modify(_) = event.kind {
-            let log = std::fs::read_to_string(config.log_path.clone()).unwrap();
-            let lines: Vec<&str> = log.split("\n").collect();
-            let last_line = lines.last().unwrap();
+            let log = std::fs::read_to_string(&config.log_path)
+                .map_err(|e| eprintln!("Error reading log: {e}"))
+                .unwrap();
+
+            // Get last non-empty line
+            let last_line = log
+                .lines() // Uses Rust's built-in line iterator
+                .rev() // Reverse to find last non-empty line
+                .find(|line| !line.trim().is_empty())
+                .unwrap_or("");
+            info!("Last line: {}", last_line);
             let player_regex =
                 Regex::new(r"\[.*:.*:.*\] \[.* thread\/INFO\]: \[CHAT\] ONLINE: ").unwrap();
 
             if last_line.starts_with("[CHAT] ONLINE:") {
+                info!("/who has been executed");
                 let cleaned_line = player_regex.replace_all(last_line, "").replace('\r', "");
+                info!("Cleaned line: {}", cleaned_line);
 
                 let rt = Arc::clone(&rt);
 
                 let names: Vec<String> = cleaned_line.split(", ").map(|x| x.to_string()).collect();
+                info!("Names: {:?}", names);
                 // Only god knows why this works.
                 let value = config.clone();
                 rt.spawn(async move {
+                    info!("Getting player uuids");
                     let players = get_player_uuids(names).await.unwrap();
 
                     for (_, uuid) in players {
+                        info!("Getting hypixel data for {}", uuid);
                         let config = value.clone();
                         let hypixel_data = get_hypixel_data(uuid, config)
                             .await
@@ -115,6 +141,9 @@ async fn main() -> Result<()> {
             }
         }
     })?;
+
+    // Keep the program running indefinitely
+    tokio::signal::ctrl_c().await?;
 
     Ok(())
 }
