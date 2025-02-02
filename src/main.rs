@@ -1,13 +1,17 @@
-use std::{sync::Arc, collections::HashMap};
-use hotwatch::{Hotwatch, EventKind};
-use hypixel::{ApiHypixelData, HypixelPlayer};
-use regex::Regex;
-use tokio::{runtime::Runtime, fs::{self, File}, io::AsyncWriteExt};
 use anyhow::Result;
-use serde_derive::{Deserialize, Serialize};
-use log::{trace, warn, error};
+use hotwatch::{EventKind, Hotwatch};
+use hypixel::{ApiHypixelData, HypixelPlayer};
+use log::{error, trace, warn};
+use regex::Regex;
 use reqwest::Client;
+use serde_derive::{Deserialize, Serialize};
 use serde_json::json;
+use std::{collections::HashMap, sync::Arc};
+use tokio::{
+    fs::{self, File},
+    io::AsyncWriteExt,
+    runtime::Runtime,
+};
 
 type Uuid = String;
 
@@ -37,7 +41,7 @@ impl std::default::Default for Config {
         Config {
             log_path: log_path.display().to_string(),
             api_key: "INSERT_API_KEY_HERE".to_string(),
-            quit_level: 130
+            quit_level: 130,
         }
     }
 }
@@ -45,7 +49,7 @@ impl std::default::Default for Config {
 #[derive(Deserialize)]
 struct Player {
     name: String,
-    id: String
+    id: String,
 }
 
 const CONFIG_PATH: &str = "config.toml";
@@ -78,7 +82,6 @@ async fn main() -> Result<()> {
     let config = Arc::new(read_config().await?);
     let rt = Runtime::new()?;
     let rt = Arc::new(rt);
-    
 
     let mut hotwatch = Hotwatch::new()?;
     hotwatch.watch(config.log_path.clone(), move |event| {
@@ -86,15 +89,14 @@ async fn main() -> Result<()> {
             let log = std::fs::read_to_string(config.log_path.clone()).unwrap();
             let lines: Vec<&str> = log.split("\n").collect();
             let last_line = lines.last().unwrap();
-            let player_regex = Regex::new(r"\[.*:.*:.*\] \[.* thread\/INFO\]: \[CHAT\] ONLINE: ").unwrap();
+            let player_regex =
+                Regex::new(r"\[.*:.*:.*\] \[.* thread\/INFO\]: \[CHAT\] ONLINE: ").unwrap();
 
             if last_line.starts_with("[CHAT] ONLINE:") {
-                let cleaned_line = player_regex
-                    .replace_all(last_line, "")
-                    .replace('\r', "");
+                let cleaned_line = player_regex.replace_all(last_line, "").replace('\r', "");
 
                 let rt = Arc::clone(&rt);
-                
+
                 let names: Vec<String> = cleaned_line.split(", ").map(|x| x.to_string()).collect();
                 // Only god knows why this works.
                 let value = config.clone();
@@ -113,7 +115,6 @@ async fn main() -> Result<()> {
                         eprintln!("{:#?}", hypixel_data);
                     }
                 });
-
             }
         }
     })?;
@@ -129,12 +130,13 @@ async fn get_player_uuids(names: Vec<String>) -> Result<HashMap<String, Uuid>> {
 
     for chunk in chunks {
         let body = json!(chunk);
-        let response_res = client.post("https://api.minecraftservices.com/minecraft/profile/lookup/bulk/byname")
+        let response_res = client
+            .post("https://api.minecraftservices.com/minecraft/profile/lookup/bulk/byname")
             .header("content-type", "application/json")
             .json(&body)
             .send()
             .await;
-        
+
         if let Ok(resp) = response_res {
             if !resp.status().is_success() {
                 handle_mojang_failure(&client, chunk, &mut mojang_players).await?;
@@ -147,17 +149,22 @@ async fn get_player_uuids(names: Vec<String>) -> Result<HashMap<String, Uuid>> {
                 mojang_players.insert(player.id, player.name);
             }
         }
-    };
+    }
 
     Ok(mojang_players)
 }
 
-async fn handle_mojang_failure(client: &Client, chunk: &[String], mojang_players: &mut HashMap<String, Uuid>) -> Result<()> {
+async fn handle_mojang_failure(
+    client: &Client,
+    chunk: &[String],
+    mojang_players: &mut HashMap<String, Uuid>,
+) -> Result<()> {
     warn!("There was an error returned from Mojang API.");
     warn!("Retrying using fallback api (api.minetools.eu)...");
 
     for player in chunk {
-        let response_res = client.get(format!("https://api.minetools.eu/uuid/{}", player))
+        let response_res = client
+            .get(format!("https://api.minetools.eu/uuid/{}", player))
             .send()
             .await;
 
@@ -172,11 +179,12 @@ async fn handle_mojang_failure(client: &Client, chunk: &[String], mojang_players
 
 async fn get_hypixel_data(uuid: Uuid, config: Arc<Config>) -> Result<HypixelPlayer> {
     let client = Client::new();
-    let response = client.get(format!("https://api.hypixel.net/v2/player?uuid={uuid}"))
+    let response = client
+        .get(format!("https://api.hypixel.net/v2/player?uuid={uuid}"))
         .header("API-Key", &config.api_key)
         .send()
         .await;
-    
+
     if let Ok(resp) = response {
         let hypixel_data: ApiHypixelData = resp.json().await?;
         if hypixel_data.player.is_some() {

@@ -1,5 +1,4 @@
 #[allow(dead_code)]
-
 use serde_derive::Deserialize;
 
 use crate::Uuid;
@@ -26,7 +25,7 @@ pub struct HypixelPlayer {
     pub wlr: f32,
     pub final_kills: i32,
     pub wins: i32,
-    pub bed_break: i32
+    pub bed_break: i32,
 }
 
 impl HypixelPlayer {
@@ -34,35 +33,89 @@ impl HypixelPlayer {
         HypixelPlayer {
             name: raw_info.clone().name,
             uuid: player_uuid,
-            rank: if raw_info.clone().monthly_package_rank.unwrap_or("".to_string()) == "SUPERSTAR" {
+            rank: if raw_info
+                .clone()
+                .monthly_package_rank
+                .unwrap_or("".to_string())
+                == "SUPERSTAR"
+            {
                 "MVP++".to_string()
             } else {
-                raw_info.clone().new_package_rank.unwrap_or("Default".to_string()).replace("_PLUS", "+")
+                raw_info
+                    .clone()
+                    .new_package_rank
+                    .unwrap_or("Default".to_string())
+                    .replace("_PLUS", "+")
             },
             network_xp: raw_info.clone().network_xp.unwrap_or(0),
-            network_level: calculate_level(raw_info.clone().network_xp.unwrap_or(-1) as f32).round() as i32,
-            level: raw_info.clone().achievements.and_then(|a| a.bedwars_level).unwrap_or(-1),
-            winstreak: raw_info.clone().stats.and_then(|a| a.bedwars).and_then(|b| b.winstreak).unwrap_or(-1),
+            network_level: calculate_level(raw_info.clone().network_xp.unwrap_or(-1) as f32).round()
+                as i32,
+            level: raw_info
+                .clone()
+                .achievements
+                .and_then(|a| a.bedwars_level)
+                .unwrap_or(-1),
+            winstreak: raw_info
+                .clone()
+                .stats
+                .and_then(|a| a.bedwars)
+                .and_then(|b| b.winstreak)
+                .unwrap_or(-1),
             fkdr: {
-                let final_kills = raw_info.clone().stats.and_then(|a| a.bedwars).and_then(|b| b.final_kills_bedwars).unwrap_or(-1);
-                let final_deaths = raw_info.clone().stats.and_then(|a| a.bedwars).and_then(|b| b.final_deaths_bedwars).unwrap_or(-1);
+                let final_kills = raw_info
+                    .clone()
+                    .stats
+                    .and_then(|a| a.bedwars)
+                    .and_then(|b| b.final_kills_bedwars)
+                    .unwrap_or(-1);
+                let final_deaths = raw_info
+                    .clone()
+                    .stats
+                    .and_then(|a| a.bedwars)
+                    .and_then(|b| b.final_deaths_bedwars)
+                    .unwrap_or(-1);
                 final_kills as f32 / final_deaths as f32
             },
             wlr: {
-                let wins = raw_info.clone().stats.and_then(|a| a.bedwars).and_then(|b| b.wins_bedwars).unwrap_or(-1);
-                let losses = raw_info.clone().stats.and_then(|a| a.bedwars).and_then(|b| b.losses_bedwars).unwrap_or(-1);
+                let wins = raw_info
+                    .clone()
+                    .stats
+                    .and_then(|a| a.bedwars)
+                    .and_then(|b| b.wins_bedwars)
+                    .unwrap_or(-1);
+                let losses = raw_info
+                    .clone()
+                    .stats
+                    .and_then(|a| a.bedwars)
+                    .and_then(|b| b.losses_bedwars)
+                    .unwrap_or(-1);
                 wins as f32 / losses as f32
             },
-            final_kills: raw_info.clone().stats.and_then(|a| a.bedwars).and_then(|b| b.final_kills_bedwars).unwrap_or(-1),
-            wins: raw_info.clone().stats.and_then(|a| a.bedwars).and_then(|b| b.wins_bedwars).unwrap_or(-1),
-            bed_break: raw_info.clone().stats.and_then(|a| a.bedwars).and_then(|b| b.beds_broken_bedwars).unwrap_or(-1),
+            final_kills: raw_info
+                .clone()
+                .stats
+                .and_then(|a| a.bedwars)
+                .and_then(|b| b.final_kills_bedwars)
+                .unwrap_or(-1),
+            wins: raw_info
+                .clone()
+                .stats
+                .and_then(|a| a.bedwars)
+                .and_then(|b| b.wins_bedwars)
+                .unwrap_or(-1),
+            bed_break: raw_info
+                .clone()
+                .stats
+                .and_then(|a| a.bedwars)
+                .and_then(|b| b.beds_broken_bedwars)
+                .unwrap_or(-1),
         }
     }
 }
 
 #[derive(Deserialize)]
 pub struct ApiHypixelData {
-    pub player: Option<ApiHypixelPlayer>
+    pub player: Option<ApiHypixelPlayer>,
 }
 
 #[derive(Deserialize, Clone)]
@@ -76,18 +129,18 @@ pub struct ApiHypixelPlayer {
     #[serde(rename = "networkExp")]
     network_xp: Option<i32>,
     achievements: Option<ApiAchievements>,
-    stats: Option<ApiStats>
+    stats: Option<ApiStats>,
 }
 
 #[derive(Deserialize, Clone)]
 struct ApiAchievements {
-    bedwars_level: Option<i32>
+    bedwars_level: Option<i32>,
 }
 
 #[derive(Deserialize, Clone)]
 struct ApiStats {
     #[serde(rename = "Bedwars")]
-    bedwars: Option<ApiBedwarsStats>
+    bedwars: Option<ApiBedwarsStats>,
 }
 
 #[derive(Deserialize, Clone)]
@@ -99,7 +152,6 @@ struct ApiBedwarsStats {
     losses_bedwars: Option<i32>,
     beds_broken_bedwars: Option<i32>,
 }
-
 
 fn calculate_level(exp: f32) -> f32 {
     if exp < 0.0 {
