@@ -55,10 +55,7 @@ struct Player {
 const CONFIG_PATH: &str = "config.toml";
 
 async fn read_config() -> Result<Config> {
-    let exists = match fs::try_exists("config.toml").await {
-        Ok(true) => true,
-        _ => false,
-    };
+    let exists = matches!(fs::try_exists("config.toml").await, Ok(true));
 
     if !exists {
         trace!("Creating config file at {CONFIG_PATH}");
