@@ -6,8 +6,6 @@ use crate::Uuid;
 pub const BASE: f32 = 10000.0;
 pub const GROWTH: f32 = 2500.0;
 
-const HALF_GROWTH: f32 = GROWTH * 0.5;
-
 const REVERSE_PQ_PREFIX: f32 = -(BASE - 0.5 * GROWTH) / GROWTH;
 const REVERSE_CONST: f32 = REVERSE_PQ_PREFIX * REVERSE_PQ_PREFIX;
 const GROWTH_DIVIDES_2: f32 = 2.0 / GROWTH;
@@ -30,85 +28,39 @@ pub struct HypixelPlayer {
 
 impl HypixelPlayer {
     pub fn from_api(raw_info: ApiHypixelPlayer, player_uuid: Uuid) -> Self {
+        let stats = raw_info.stats.as_ref();
+        let bedwars = stats.and_then(|s| s.bedwars.as_ref());
+        let achievements = raw_info.achievements.as_ref();
+
+        let (final_kills, final_deaths) = (
+            bedwars.and_then(|b| b.final_kills_bedwars).unwrap_or(-1),
+            bedwars.and_then(|b| b.final_deaths_bedwars).unwrap_or(-1),
+        );
+        let (wins, losses) = (
+            bedwars.and_then(|b| b.wins_bedwars).unwrap_or(-1),
+            bedwars.and_then(|b| b.losses_bedwars).unwrap_or(-1),
+        );
+
         HypixelPlayer {
-            name: raw_info.clone().name,
+            name: raw_info.name,
             uuid: player_uuid,
-            rank: if raw_info
-                .clone()
-                .monthly_package_rank
-                .unwrap_or("".to_string())
-                == "SUPERSTAR"
-            {
-                "MVP++".to_string()
-            } else {
-                raw_info
-                    .clone()
+            rank: match raw_info.monthly_package_rank.as_deref() {
+                Some("SUPERSTAR") => "MVP++".to_string(),
+                _ => raw_info
                     .new_package_rank
-                    .unwrap_or("Default".to_string())
-                    .replace("_PLUS", "+")
+                    .as_deref()
+                    .unwrap_or("Default")
+                    .replace("_PLUS", "+"),
             },
-            network_xp: raw_info.clone().network_xp.unwrap_or(0),
-            network_level: calculate_level(raw_info.clone().network_xp.unwrap_or(-1) as f32).round()
-                as i32,
-            level: raw_info
-                .clone()
-                .achievements
-                .and_then(|a| a.bedwars_level)
-                .unwrap_or(-1),
-            winstreak: raw_info
-                .clone()
-                .stats
-                .and_then(|a| a.bedwars)
-                .and_then(|b| b.winstreak)
-                .unwrap_or(-1),
-            fkdr: {
-                let final_kills = raw_info
-                    .clone()
-                    .stats
-                    .and_then(|a| a.bedwars)
-                    .and_then(|b| b.final_kills_bedwars)
-                    .unwrap_or(-1);
-                let final_deaths = raw_info
-                    .clone()
-                    .stats
-                    .and_then(|a| a.bedwars)
-                    .and_then(|b| b.final_deaths_bedwars)
-                    .unwrap_or(-1);
-                final_kills as f32 / final_deaths as f32
-            },
-            wlr: {
-                let wins = raw_info
-                    .clone()
-                    .stats
-                    .and_then(|a| a.bedwars)
-                    .and_then(|b| b.wins_bedwars)
-                    .unwrap_or(-1);
-                let losses = raw_info
-                    .clone()
-                    .stats
-                    .and_then(|a| a.bedwars)
-                    .and_then(|b| b.losses_bedwars)
-                    .unwrap_or(-1);
-                wins as f32 / losses as f32
-            },
-            final_kills: raw_info
-                .clone()
-                .stats
-                .and_then(|a| a.bedwars)
-                .and_then(|b| b.final_kills_bedwars)
-                .unwrap_or(-1),
-            wins: raw_info
-                .clone()
-                .stats
-                .and_then(|a| a.bedwars)
-                .and_then(|b| b.wins_bedwars)
-                .unwrap_or(-1),
-            bed_break: raw_info
-                .clone()
-                .stats
-                .and_then(|a| a.bedwars)
-                .and_then(|b| b.beds_broken_bedwars)
-                .unwrap_or(-1),
+            network_xp: raw_info.network_xp.unwrap_or(0),
+            network_level: calculate_level(raw_info.network_xp.unwrap_or(-1) as f32).round() as i32,
+            level: achievements.and_then(|a| a.bedwars_level).unwrap_or(-1),
+            winstreak: bedwars.and_then(|b| b.winstreak).unwrap_or(-1),
+            fkdr: final_kills as f32 / final_deaths as f32,
+            wlr: wins as f32 / losses as f32,
+            final_kills,
+            wins: bedwars.and_then(|b| b.wins_bedwars).unwrap_or(-1),
+            bed_break: bedwars.and_then(|b| b.beds_broken_bedwars).unwrap_or(-1),
         }
     }
 }
