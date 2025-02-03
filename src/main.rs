@@ -89,61 +89,82 @@ async fn main() -> Result<()> {
         .unwrap();
 
     let config = Arc::new(read_config().await?);
-    let rt = Runtime::new()?;
-    let rt = Arc::new(rt);
+    let rt = Arc::new(Runtime::new()?);
+    let last_processed_line = Arc::new(std::sync::Mutex::new(String::new()));
 
     let mut hotwatch = Hotwatch::new()?;
     info!("Watching log path: {}", config.log_path);
-    hotwatch.watch(config.log_path.clone(), move |event| {
-        if let EventKind::Modify(_) = event.kind {
-            let log = std::fs::read_to_string(&config.log_path)
-                .map_err(|e| eprintln!("Error reading log: {e}"))
-                .unwrap();
+    hotwatch.watch(config.log_path.clone(), {
+        let config = Arc::clone(&config);
+        let rt = Arc::clone(&rt);
+        let last_processed_line = Arc::clone(&last_processed_line);
 
-            // Get last non-empty line
-            let last_line = log
-                .lines() // Uses Rust's built-in line iterator
-                .rev() // Reverse to find last non-empty line
-                .find(|line| !line.trim().is_empty())
-                .unwrap_or("");
-            info!("Last line: {}", last_line);
-            let player_regex =
-                Regex::new(r"\[.*:.*:.*\] \[.* thread\/INFO\]: \[CHAT\] ONLINE: ").unwrap();
-
-            if last_line.starts_with("[CHAT] ONLINE:") {
-                info!("/who has been executed");
-                let cleaned_line = player_regex.replace_all(last_line, "").replace('\r', "");
-                info!("Cleaned line: {}", cleaned_line);
-
-                let rt = Arc::clone(&rt);
-
-                let names: Vec<String> = cleaned_line.split(", ").map(|x| x.to_string()).collect();
-                info!("Names: {:?}", names);
-                // Only god knows why this works.
-                let value = config.clone();
-                rt.spawn(async move {
-                    info!("Getting player uuids");
-                    let players = get_player_uuids(names).await.unwrap();
-
-                    for (_, uuid) in players {
-                        info!("Getting hypixel data for {}", uuid);
-                        let config = value.clone();
-                        let hypixel_data = get_hypixel_data(uuid, config)
-                            .await
-                            .map_err(|e| {
-                                error!("Error while getting data from hypixel: {e}");
-                            })
-                            .unwrap();
-
-                        eprintln!("{:#?}", hypixel_data);
+        move |event| {
+            if let EventKind::Modify(_) = event.kind {
+                let log = match std::fs::read_to_string(&config.log_path) {
+                    Ok(l) => l,
+                    Err(e) => {
+                        eprintln!("Error reading log: {e}");
+                        return;
                     }
-                });
+                };
+
+                let last_line = log
+                    .lines()
+                    .rev()
+                    .find(|line| !line.trim().is_empty())
+                    .unwrap_or("");
+                info!("Last line: {}", last_line);
+
+                // Check for duplicates
+                {
+                    let mut stored_line = last_processed_line.lock().unwrap();
+                    if last_line == *stored_line {
+                        return;
+                    }
+                    *stored_line = last_line.to_string();
+                }
+
+                let player_regex =
+                    Regex::new(r"\[.*:.*:.*\] \[.* thread\/INFO\]: \[CHAT\] ONLINE: ").unwrap();
+
+                if last_line.starts_with("[CHAT] ONLINE:") {
+                    info!("/who has been executed");
+                    let cleaned_line = player_regex.replace_all(last_line, "").replace('\r', "");
+                    info!("Cleaned line: {}", cleaned_line);
+
+                    let rt = Arc::clone(&rt);
+
+                    let names: Vec<String> =
+                        cleaned_line.split(", ").map(|x| x.to_string()).collect();
+                    info!("Names: {:?}", names);
+                    // Only god knows why this works.
+                    let value = config.clone();
+                    rt.spawn(async move {
+                        info!("Getting player uuids");
+                        let players = get_player_uuids(names).await.unwrap();
+
+                        for (_, uuid) in players {
+                            info!("Getting hypixel data for {}", uuid);
+                            let config = value.clone();
+                            let hypixel_data = get_hypixel_data(uuid, config)
+                                .await
+                                .map_err(|e| {
+                                    error!("Error while getting data from hypixel: {e}");
+                                })
+                                .unwrap();
+
+                            eprintln!("{:#?}", hypixel_data);
+                        }
+                    });
+                }
             }
         }
     })?;
 
     // Keep the program running indefinitely
     tokio::signal::ctrl_c().await?;
+    warn!("Received CTRL+C. Closing");
 
     Ok(())
 }
