@@ -1,7 +1,21 @@
 [package]
-name = "bwoverlay-rs"
+name = "bwoverlay"
 version = "0.1.0"
 edition = "2021"
+license = "Apache-2.0 OR MIT"
+categories = ["command-line-utilities"]
+keywords = ["cli", "command-line"]
+readme = "README.md"
+repository = "https://github.com/EmirhanTr3/bwoverlay-rs"
+
+[profile.dev]
+debug = false
+
+[profile.release]
+strip = true
+lto = true
+overflow-checks = true
+panic = "abort"
 
 [dependencies]
 tokio = { version = "1.43.0", features = ["full"] }
