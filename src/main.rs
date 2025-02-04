@@ -12,6 +12,7 @@ use tokio::{
     io::AsyncWriteExt,
     runtime::Runtime,
 };
+use uuid as uuid_crate;
 
 type Uuid = String;
 
@@ -125,15 +126,13 @@ async fn main() -> Result<()> {
                     *stored_line = last_line.to_string();
                 }
 
-                let player_regex =
-                    Regex::new(r"\[.*:.*:.*\] \[.* thread\/INFO\]: \[CHAT\] ONLINE: ").unwrap();
+                let player_regex = Regex::new(r"\[CHAT\] ONLINE: (.*)").unwrap();
 
-                if last_line.starts_with("[CHAT] ONLINE:") {
+                if player_regex.is_match(last_line) {
                     info!("/who has been executed");
-                    let cleaned_line = player_regex.replace_all(last_line, "").replace('\r', "");
+                    let captures = player_regex.captures(last_line).unwrap();
+                    let cleaned_line = captures.get(1).unwrap().as_str();
                     info!("Cleaned line: {}", cleaned_line);
-
-                    let rt = Arc::clone(&rt);
 
                     let names: Vec<String> =
                         cleaned_line.split(", ").map(|x| x.to_string()).collect();
@@ -142,11 +141,17 @@ async fn main() -> Result<()> {
                     let value = config.clone();
                     rt.spawn(async move {
                         info!("Getting player uuids");
-                        let players = get_player_uuids(names).await.unwrap();
+                        let players = get_player_uuids(names)
+                            .await
+                            .map_err(|e| {
+                                error!("Error while getting player uuids: {e}");
+                            })
+                            .unwrap();
 
-                        for (_, uuid) in players {
+                        for (uuid, player) in players {
                             info!("Getting hypixel data for {}", uuid);
                             let config = value.clone();
+                            info!("UUID for {}: {}", player, uuid);
                             let hypixel_data = get_hypixel_data(uuid, config)
                                 .await
                                 .map_err(|e| {
@@ -225,19 +230,71 @@ async fn handle_mojang_failure(
 }
 
 async fn get_hypixel_data(uuid: Uuid, config: Arc<Config>) -> Result<HypixelPlayer> {
-    let client = Client::new();
-    let response = client
-        .get(format!("https://api.hypixel.net/v2/player?uuid={uuid}"))
-        .header("API-Key", &config.api_key)
-        .send()
-        .await;
+    info!("UUID being passed: {uuid}");
+    let hypixel_uuid = uuid_crate::Uuid::parse_str(&uuid)
+        .map_err(|e| {
+            error!("Invalid UUID format: {e}");
+        })
+        .unwrap();
 
-    if let Ok(resp) = response {
-        let hypixel_data: ApiHypixelData = resp.json().await?;
-        if hypixel_data.player.is_some() {
-            return Ok(HypixelPlayer::from_api(hypixel_data.player.unwrap(), uuid));
-        }
+    let url = format!(
+        "https://api.hypixel.net/player?key={}&uuid={}",
+        config.api_key, hypixel_uuid
+    );
+
+    let client = Client::new();
+    let response = client.get(&url).send().await?;
+
+    let status = response.status();
+    let body = response.text().await?;
+
+    if !status.is_success() {
+        error!("Hypixel API returned an error: {}", body);
+        return Err(anyhow::anyhow!("Hypixel API error: {}", status));
     }
 
-    anyhow::bail!("response is not ok");
+    let parsed: Result<HypixelPlayer, _> = serde_json::from_str(&body);
+
+    if let Err(e) = &parsed {
+        error!(
+            "Failed to parse Hypixel API response: {}\nBody: {}",
+            e, body
+        );
+    }
+
+    parsed.map_err(|e| anyhow::anyhow!("Failed to parse Hypixel API response: {}", e))
 }
+
+// TODO: uncomment this later and replace the get_hypixel_data function with this one
+// async fn get_hypixel_data(uuid: Uuid, config: Arc<Config>) -> Result<HypixelPlayer> {
+//     info!("UUID being passed: {uuid}");
+//     let hypixel_uuid = uuid_crate::Uuid::parse_str(&uuid).unwrap();
+//     info!("About to send: {}", &hypixel_uuid);
+//     let client = Client::new();
+//     let response = client
+//         .get(format!(
+//             "https://api.hypixel.net/v2/player?uuid={}",
+//             &hypixel_uuid
+//         ))
+//         .header("API-Key", &config.api_key)
+//         // .query(&[("uuid", hypixel_uuid.to_string())])
+//         .send()
+//         .await;
+//
+//     match response {
+//         Ok(resp) => {
+//             if !resp.status().is_success() {
+//                 anyhow::bail!("response is not ok: {}", resp.status());
+//             }
+//             let hypixel_data: ApiHypixelData = resp.json().await?;
+//             if hypixel_data.player.is_some() {
+//                 return Ok(HypixelPlayer::from_api(hypixel_data.player.unwrap(), uuid));
+//             }
+//         }
+//         Err(e) => {
+//             return Err(anyhow::anyhow!(e));
+//         }
+//     }
+//
+//     anyhow::bail!("response is not ok");
+// }
